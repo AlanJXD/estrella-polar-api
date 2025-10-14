@@ -1,0 +1,226 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// =============================================
+// CATÁLOGOS
+// =============================================
+
+model TipoCaja {
+  id                  Int      @id @default(autoincrement()) @map("id_tipo_caja")
+  nombre              String   @unique @db.VarChar(50)
+  descripcion         String?  @db.Text
+  activo              Int      @default(1) @db.TinyInt
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  cajas               Caja[]
+
+  @@map("c_tipos_caja")
+}
+
+model TipoMovimiento {
+  id                  Int                @id @default(autoincrement()) @map("id_tipo_movimiento")
+  nombre              String             @unique @db.VarChar(50)
+  activo              Int                @default(1) @db.TinyInt
+  fechaRegistro       DateTime           @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime           @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  movimientos         MovimientoCaja[]
+
+  @@map("c_tipos_movimiento")
+}
+
+model Paquete {
+  id                  Int      @id @default(autoincrement()) @map("id_paquete")
+  nombre              String   @db.VarChar(100)
+  descripcion         String?  @db.Text
+  precio              Decimal  @db.Decimal(10, 2)
+  porcentajeItzel     Decimal  @default(33.33) @map("porcentaje_itzel") @db.Decimal(5, 2)
+  porcentajeCristian  Decimal  @default(33.33) @map("porcentaje_cristian") @db.Decimal(5, 2)
+  porcentajeCesar     Decimal  @default(33.34) @map("porcentaje_cesar") @db.Decimal(5, 2)
+  activo              Int      @default(1) @db.TinyInt
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  sesiones            Sesion[]
+
+  @@map("c_paquetes")
+}
+
+// =============================================
+// TABLAS BASE
+// =============================================
+
+model Usuario {
+  id                  Int                @id @default(autoincrement()) @map("id_usuario")
+  usuario             String             @unique @db.VarChar(50)
+  passwordHash        String             @map("password_hash") @db.VarChar(255)
+  nombre              String             @db.VarChar(100)
+  apellidoPaterno     String             @map("apellido_paterno") @db.VarChar(100)
+  apellidoMaterno     String?            @map("apellido_materno") @db.VarChar(100)
+  celular             String?            @db.VarChar(20)
+  correo              String             @unique @db.VarChar(100)
+  activo              Int                @default(1) @db.TinyInt
+  fechaRegistro       DateTime           @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime           @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  sesionesCreadas     Sesion[]
+  movimientosRealizados MovimientoCaja[]
+
+  @@index([usuario])
+  @@index([correo])
+  @@map("b_usuarios")
+}
+
+model Caja {
+  id                  Int                @id @default(autoincrement()) @map("id_caja")
+  tipoCajaId          Int                @map("tipo_caja_id")
+  saldoActual         Decimal            @default(0.00) @map("saldo_actual") @db.Decimal(10, 2)
+  activo              Int                @default(1) @db.TinyInt
+  fechaRegistro       DateTime           @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime           @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  tipoCaja            TipoCaja           @relation(fields: [tipoCajaId], references: [id])
+  movimientos         MovimientoCaja[]
+  liquidaciones       Liquidacion[]
+
+  @@unique([tipoCajaId])
+  @@map("b_cajas")
+}
+
+model Sesion {
+  id                  Int                  @id @default(autoincrement()) @map("id_sesion")
+  fecha               DateTime             @db.Date
+  horaInicial         DateTime             @map("hora_inicial") @db.Time(0)
+  horaFinal           DateTime             @map("hora_final") @db.Time(0)
+  nombreCliente       String               @map("nombre_cliente") @db.VarChar(200)
+  celularCliente      String?              @map("celular_cliente") @db.VarChar(20)
+  paqueteId           Int                  @map("paquete_id")
+  especificaciones    String?              @db.Text
+  anticipo            Decimal              @default(0.00) @db.Decimal(10, 2)
+  restante            Decimal              @default(0.00) @db.Decimal(10, 2)
+  comentario          String?              @db.Text
+  montoCaja           Decimal              @default(0.00) @map("monto_caja") @db.Decimal(10, 2)
+  editado             Int                  @default(0) @db.TinyInt
+  entregado           Int                  @default(0) @db.TinyInt
+  usuarioId           Int                  @map("usuario_id")
+  activo              Int                  @default(1) @db.TinyInt
+  fechaRegistro       DateTime             @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime             @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  paquete             Paquete              @relation(fields: [paqueteId], references: [id])
+  usuario             Usuario              @relation(fields: [usuarioId], references: [id])
+  ingresosExtra       IngresoExtra[]
+  gastos              Gasto[]
+  liquidaciones       Liquidacion[]
+  distribucion        DistribucionSesion?
+  movimientos         MovimientoCaja[]
+
+  @@index([fecha, horaInicial])
+  @@index([nombreCliente])
+  @@map("b_sesiones")
+}
+
+model MovimientoCaja {
+  id                  Int              @id @default(autoincrement()) @map("id_movimiento")
+  cajaId              Int              @map("caja_id")
+  tipoMovimientoId    Int              @map("tipo_movimiento_id")
+  concepto            String           @db.VarChar(255)
+  monto               Decimal          @db.Decimal(10, 2)
+  saldoAnterior       Decimal          @map("saldo_anterior") @db.Decimal(10, 2)
+  saldoNuevo          Decimal          @map("saldo_nuevo") @db.Decimal(10, 2)
+  usuarioId           Int              @map("usuario_id")
+  sesionId            Int?             @map("sesion_id")
+  activo              Int              @default(1) @db.TinyInt
+  fechaRegistro       DateTime         @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime         @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  caja                Caja             @relation(fields: [cajaId], references: [id])
+  tipoMovimiento      TipoMovimiento   @relation(fields: [tipoMovimientoId], references: [id])
+  usuario             Usuario          @relation(fields: [usuarioId], references: [id])
+  sesion              Sesion?          @relation(fields: [sesionId], references: [id], onDelete: SetNull)
+
+  @@index([cajaId, fechaRegistro])
+  @@index([sesionId])
+  @@map("b_movimientos_caja")
+}
+
+model IngresoExtra {
+  id                  Int      @id @default(autoincrement()) @map("id_ingreso_extra")
+  sesionId            Int      @map("sesion_id")
+  concepto            String   @db.VarChar(255)
+  monto               Decimal  @db.Decimal(10, 2)
+  activo              Int      @default(1) @db.TinyInt
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  sesion              Sesion   @relation(fields: [sesionId], references: [id], onDelete: Cascade)
+
+  @@index([sesionId])
+  @@map("b_ingresos_extra")
+}
+
+model Gasto {
+  id                  Int      @id @default(autoincrement()) @map("id_gasto")
+  sesionId            Int      @map("sesion_id")
+  concepto            String   @db.VarChar(255)
+  monto               Decimal  @db.Decimal(10, 2)
+  activo              Int      @default(1) @db.TinyInt
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  sesion              Sesion   @relation(fields: [sesionId], references: [id], onDelete: Cascade)
+
+  @@index([sesionId])
+  @@map("b_gastos")
+}
+
+// =============================================
+// TABLAS DE RELACIÓN
+// =============================================
+
+model Liquidacion {
+  id                  Int      @id @default(autoincrement()) @map("id_liquidacion")
+  sesionId            Int      @map("sesion_id")
+  monto               Decimal  @db.Decimal(10, 2)
+  cajaDestinoId       Int      @map("caja_destino_id")
+  activo              Int      @default(1) @db.TinyInt
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  sesion              Sesion   @relation(fields: [sesionId], references: [id], onDelete: Cascade)
+  cajaDestino         Caja     @relation(fields: [cajaDestinoId], references: [id])
+
+  @@index([sesionId])
+  @@map("r_liquidaciones")
+}
+
+model DistribucionSesion {
+  id                  Int      @id @default(autoincrement()) @map("id_distribucion")
+  sesionId            Int      @unique @map("sesion_id")
+  porcentajeItzel     Decimal  @map("porcentaje_itzel") @db.Decimal(5, 2)
+  porcentajeCristian  Decimal  @map("porcentaje_cristian") @db.Decimal(5, 2)
+  porcentajeCesar     Decimal  @map("porcentaje_cesar") @db.Decimal(5, 2)
+  montoItzel          Decimal  @default(0.00) @map("monto_itzel") @db.Decimal(10, 2)
+  montoCristian       Decimal  @default(0.00) @map("monto_cristian") @db.Decimal(10, 2)
+  montoCesar          Decimal  @default(0.00) @map("monto_cesar") @db.Decimal(10, 2)
+  ingresosTotales     Decimal  @default(0.00) @map("ingresos_totales") @db.Decimal(10, 2)
+  gastosTotales       Decimal  @default(0.00) @map("gastos_totales") @db.Decimal(10, 2)
+  neto                Decimal  @default(0.00) @db.Decimal(10, 2)
+  activo              Int      @default(1) @db.TinyInt
+  fechaRegistro       DateTime @default(now()) @map("fecha_registro") @db.Timestamp(0)
+  fechaActualizacion  DateTime @default(now()) @updatedAt @map("fecha_actualizacion") @db.Timestamp(0)
+
+  sesion              Sesion   @relation(fields: [sesionId], references: [id], onDelete: Cascade)
+
+  @@map("r_distribucion_sesion")
+}
