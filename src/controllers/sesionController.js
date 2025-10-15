@@ -35,6 +35,13 @@ class SesionController {
                 apellidoPaterno: true,
               },
             },
+            liquidaciones: {
+              where: { activo: 1 },
+              select: {
+                id: true,
+                monto: true,
+              },
+            },
           },
           orderBy: [{ fecha: 'desc' }, { horaInicial: 'desc' }],
           take: parseInt(limit),
@@ -201,6 +208,13 @@ class SesionController {
         },
         include: {
           paquete: true,
+          liquidaciones: {
+            where: { activo: 1 },
+            select: {
+              id: true,
+              monto: true,
+            },
+          },
         },
         orderBy: [{ fecha: 'asc' }, { horaInicial: 'asc' }],
         take: 20,
@@ -214,3 +228,4 @@ class SesionController {
 }
 
 module.exports = new SesionController();
+ 
