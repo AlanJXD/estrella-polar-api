@@ -108,5 +108,34 @@ router.post(
   sesionController.agregarGasto
 );
 
+/**
+ * PUT /api/sesiones/:id/distribucion
+ * Actualiza los porcentajes de distribución de una sesión
+ */
+router.put(
+  '/:id/distribucion',
+  [
+    body('porcentajeItzel')
+      .isFloat({ min: 0, max: 100 })
+      .withMessage('El porcentaje de Itzel debe estar entre 0 y 100'),
+    body('porcentajeCristian')
+      .isFloat({ min: 0, max: 100 })
+      .withMessage('El porcentaje de Cristian debe estar entre 0 y 100'),
+    body('porcentajeCesar')
+      .isFloat({ min: 0, max: 100 })
+      .withMessage('El porcentaje de César debe estar entre 0 y 100'),
+    validate,
+  ],
+  sesionController.actualizarDistribucion
+);
+
+
+/**
+ * GET /api/sesiones/reporte/distribucion
+ * Obtiene el reporte de distribución de ingresos
+ */
+router.get('/reporte/distribucion', sesionController.getReporteDistribucion);
+
 module.exports = router;
+
 

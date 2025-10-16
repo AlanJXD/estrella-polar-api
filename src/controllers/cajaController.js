@@ -53,10 +53,19 @@ class CajaController {
           throw new Error(`Caja ${cajaNombre} no encontrada`);
         }
 
+        // Obtener tipo de movimiento por nombre
+        const tipo = await tx.tipoMovimiento.findFirst({
+          where: { nombre: tipoMovimiento },
+        });
+
+        if (!tipo) {
+          throw new Error('Tipo de movimiento inválido');
+        }
+
         // Crear movimiento
         return await cajaService.crearMovimiento(tx, {
           cajaId: caja.id,
-          tipoMovimiento,
+          tipoMovimientoId: tipo.id,
           concepto,
           monto,
           usuarioId,

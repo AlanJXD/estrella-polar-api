@@ -61,7 +61,7 @@ if (process.env.NODE_ENV === 'development') {
 // Rate limiting (protección contra ataques de fuerza bruta)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // límite de 100 requests por ventana
+  max: process.env.NODE_ENV === 'development' ? 500 : 100, // límite más alto en desarrollo
   message: 'Demasiadas peticiones desde esta IP, intenta de nuevo más tarde',
   standardHeaders: true,
   legacyHeaders: false,

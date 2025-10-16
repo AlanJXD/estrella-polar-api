@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const sesionService = require('../services/sesionService');
+const distribucionService = require('../services/distribucionService');
 const { successResponse, errorResponse } = require('../utils/response');
 
 class SesionController {
@@ -98,17 +99,84 @@ class SesionController {
   async update(req, res, next) {
     try {
       const { id } = req.params;
-      const { editado, entregado, comentario, especificaciones } = req.body;
+      const {
+        editado,
+        entregado,
+        comentario,
+        especificaciones,
+        montoCaja,
+        nombreCliente,
+        celularCliente,
+        fecha,
+        horaInicial,
+        horaFinal,
+        anticipo,
+        restante
+      } = req.body;
+
+      const data = {
+        editado: editado !== undefined ? editado : undefined,
+        entregado: entregado !== undefined ? entregado : undefined,
+        comentario,
+        especificaciones,
+      };
+
+      // Campos generales de la sesión
+      if (nombreCliente !== undefined) data.nombreCliente = nombreCliente;
+      if (celularCliente !== undefined) data.celularCliente = celularCliente;
+      if (fecha !== undefined) data.fecha = new Date(fecha);
+
+      // Convertir horas a formato DateTime
+      if (horaInicial !== undefined) {
+        const [hours, minutes] = horaInicial.split(':');
+        const horaDate = new Date(1970, 0, 1, parseInt(hours), parseInt(minutes), 0);
+        data.horaInicial = horaDate;
+      }
+      if (horaFinal !== undefined) {
+        const [hours, minutes] = horaFinal.split(':');
+        const horaDate = new Date(1970, 0, 1, parseInt(hours), parseInt(minutes), 0);
+        data.horaFinal = horaDate;
+      }
+
+      if (anticipo !== undefined) data.anticipo = Number(anticipo);
+      if (restante !== undefined) data.restante = Number(restante);
+
+      // Solo actualizar montoCaja si se proporciona
+      if (montoCaja !== undefined) {
+        data.montoCaja = Number(montoCaja);
+      }
 
       const sesion = await prisma.sesion.update({
         where: { id: parseInt(id) },
-        data: {
-          editado: editado !== undefined ? editado : undefined,
-          entregado: entregado !== undefined ? entregado : undefined,
-          comentario,
-          especificaciones,
-        },
+        data,
       });
+
+      // Si se actualizó montoCaja, recalcular distribución
+      if (montoCaja !== undefined) {
+        // Obtener el paquete para los porcentajes por defecto
+        const sesionConPaquete = await prisma.sesion.findUnique({
+          where: { id: parseInt(id) },
+          include: { paquete: true, distribucion: true },
+        });
+
+        if (sesionConPaquete) {
+          const porcentajes = sesionConPaquete.distribucion
+            ? {
+                itzel: Number(sesionConPaquete.distribucion.porcentajeItzel),
+                cristian: Number(sesionConPaquete.distribucion.porcentajeCristian),
+                cesar: Number(sesionConPaquete.distribucion.porcentajeCesar),
+              }
+            : {
+                itzel: Number(sesionConPaquete.paquete.porcentajeItzel),
+                cristian: Number(sesionConPaquete.paquete.porcentajeCristian),
+                cesar: Number(sesionConPaquete.paquete.porcentajeCesar),
+              };
+
+          await prisma.$transaction(async (tx) => {
+            await distribucionService.crearOActualizarDistribucion(tx, parseInt(id), porcentajes);
+          });
+        }
+      }
 
       return successResponse(res, 200, 'Sesión actualizada', sesion);
     } catch (error) {
@@ -221,6 +289,101 @@ class SesionController {
       });
 
       return successResponse(res, 200, 'Sesiones próximas obtenidas', sesiones);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * PUT /api/sesiones/:id/distribucion
+   * Actualiza los porcentajes de distribución de una sesión
+   */
+  async actualizarDistribucion(req, res, next) {
+    try {
+      const { id } = req.params;
+      const { porcentajeItzel, porcentajeCristian, porcentajeCesar } = req.body;
+
+      // Validar que se proporcionen los porcentajes
+      if (
+        porcentajeItzel === undefined ||
+        porcentajeCristian === undefined ||
+        porcentajeCesar === undefined
+      ) {
+        return errorResponse(res, 400, 'Deben proporcionarse los tres porcentajes');
+      }
+
+      // Validar que los porcentajes sumen 100
+      const suma = Number(porcentajeItzel) + Number(porcentajeCristian) + Number(porcentajeCesar);
+      if (Math.abs(suma - 100) > 0.01) {
+        return errorResponse(res, 400, 'Los porcentajes deben sumar 100%');
+      }
+
+      // Actualizar distribución usando el servicio
+      const distribucion = await prisma.$transaction(async (tx) => {
+        return await distribucionService.crearOActualizarDistribucion(tx, parseInt(id), {
+          itzel: Number(porcentajeItzel),
+          cristian: Number(porcentajeCristian),
+          cesar: Number(porcentajeCesar),
+        });
+      });
+
+      return successResponse(res, 200, 'Distribución actualizada exitosamente', distribucion);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async getReporteDistribucion(req, res, next) {
+    try {
+      const { fechaInicio, fechaFin } = req.query;
+
+      if (!fechaInicio || !fechaFin) {
+        return errorResponse(res, 400, 'Se requieren fechas de inicio y fin');
+      }
+
+      const sesiones = await prisma.sesion.findMany({
+        where: {
+          activo: 1,
+          fecha: {
+            gte: new Date(fechaInicio),
+            lte: new Date(fechaFin),
+          },
+        },
+        include: {
+          distribucion: true,
+        },
+      });
+
+      const reporte = {
+        totalNeto: 0,
+        totalAnticipos: 0,
+        totalLiquidaciones: 0,
+        totalCajas: 0,
+        totalGastos: 0,
+        totalIngresos: 0,
+        distribucion: {
+          itzel: 0,
+          cristian: 0,
+          cesar: 0,
+        },
+        sesiones: sesiones,
+      };
+
+      for (const sesion of sesiones) {
+        reporte.totalAnticipos += Number(sesion.anticipo);
+        reporte.totalCajas += Number(sesion.montoCaja);
+
+        if (sesion.distribucion) {
+          reporte.totalNeto += Number(sesion.distribucion.neto);
+          reporte.totalGastos += Number(sesion.distribucion.gastosTotales);
+          reporte.totalIngresos += Number(sesion.distribucion.ingresosTotales);
+          reporte.distribucion.itzel += Number(sesion.distribucion.montoItzel);
+          reporte.distribucion.cristian += Number(sesion.distribucion.montoCristian);
+          reporte.distribucion.cesar += Number(sesion.distribucion.montoCesar);
+        }
+      }
+
+      return successResponse(res, 200, 'Reporte de distribución obtenido', reporte);
     } catch (error) {
       next(error);
     }
