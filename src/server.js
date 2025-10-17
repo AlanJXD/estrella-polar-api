@@ -1,4 +1,8 @@
 require('dotenv').config();
+
+// Configurar zona horaria de Mazatlán
+process.env.TZ = process.env.TZ || 'America/Mazatlan';
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
