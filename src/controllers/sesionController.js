@@ -111,7 +111,8 @@ class SesionController {
         horaInicial,
         horaFinal,
         anticipo,
-        restante
+        restante,
+        paqueteId
       } = req.body;
 
       const data = {
@@ -138,29 +139,55 @@ class SesionController {
         data.horaFinal = horaDate;
       }
 
-      // Si se actualiza el anticipo, recalcular el restante automáticamente
-      if (anticipo !== undefined) {
-        data.anticipo = Number(anticipo);
+      // Obtener la sesión actual con el paquete
+      const sesionActual = await prisma.sesion.findUnique({
+        where: { id: parseInt(id) },
+        include: { paquete: true, distribucion: true },
+      });
 
-        // Obtener el paquete para calcular el restante
-        const sesionActual = await prisma.sesion.findUnique({
-          where: { id: parseInt(id) },
-          include: { paquete: true },
-        });
-
-        if (sesionActual) {
-          data.restante = Number(sesionActual.paquete.precio) - Number(anticipo);
-        }
+      if (!sesionActual) {
+        return errorResponse(res, 404, 'Sesión no encontrada');
       }
 
-      // Permitir actualizar restante manualmente solo si no se actualiza el anticipo
-      if (restante !== undefined && anticipo === undefined) {
+      let paqueteNuevo = sesionActual.paquete;
+      let debeRecalcularDistribucion = false;
+
+      // Si se cambia el paquete
+      if (paqueteId !== undefined && paqueteId !== sesionActual.paqueteId) {
+        // Verificar que el nuevo paquete existe y está activo
+        paqueteNuevo = await prisma.paquete.findUnique({
+          where: { id: paqueteId },
+        });
+
+        if (!paqueteNuevo || paqueteNuevo.activo !== 1) {
+          return errorResponse(res, 400, 'Paquete no encontrado o inactivo');
+        }
+
+        data.paqueteId = paqueteId;
+        debeRecalcularDistribucion = true;
+
+        // Recalcular el restante con el precio del nuevo paquete
+        const anticipoActual = anticipo !== undefined ? Number(anticipo) : Number(sesionActual.anticipo);
+        data.restante = Number(paqueteNuevo.precio) - anticipoActual;
+        if (anticipo !== undefined) {
+          data.anticipo = Number(anticipo);
+        }
+      }
+      // Si solo se actualiza el anticipo (sin cambiar paquete)
+      else if (anticipo !== undefined) {
+        data.anticipo = Number(anticipo);
+        data.restante = Number(paqueteNuevo.precio) - Number(anticipo);
+      }
+
+      // Permitir actualizar restante manualmente solo si no se actualiza el anticipo ni el paquete
+      if (restante !== undefined && anticipo === undefined && paqueteId === undefined) {
         data.restante = Number(restante);
       }
 
       // Solo actualizar montoCaja si se proporciona
       if (montoCaja !== undefined) {
         data.montoCaja = Number(montoCaja);
+        debeRecalcularDistribucion = true;
       }
 
       const sesion = await prisma.sesion.update({
@@ -168,31 +195,17 @@ class SesionController {
         data,
       });
 
-      // Si se actualizó montoCaja, recalcular distribución
-      if (montoCaja !== undefined) {
-        // Obtener el paquete para los porcentajes por defecto
-        const sesionConPaquete = await prisma.sesion.findUnique({
-          where: { id: parseInt(id) },
-          include: { paquete: true, distribucion: true },
+      // Si se debe recalcular distribución
+      if (debeRecalcularDistribucion) {
+        const porcentajes = {
+          itzel: Number(paqueteNuevo.porcentajeItzel),
+          cristian: Number(paqueteNuevo.porcentajeCristian),
+          cesar: Number(paqueteNuevo.porcentajeCesar),
+        };
+
+        await prisma.$transaction(async (tx) => {
+          await distribucionService.crearOActualizarDistribucion(tx, parseInt(id), porcentajes);
         });
-
-        if (sesionConPaquete) {
-          const porcentajes = sesionConPaquete.distribucion
-            ? {
-                itzel: Number(sesionConPaquete.distribucion.porcentajeItzel),
-                cristian: Number(sesionConPaquete.distribucion.porcentajeCristian),
-                cesar: Number(sesionConPaquete.distribucion.porcentajeCesar),
-              }
-            : {
-                itzel: Number(sesionConPaquete.paquete.porcentajeItzel),
-                cristian: Number(sesionConPaquete.paquete.porcentajeCristian),
-                cesar: Number(sesionConPaquete.paquete.porcentajeCesar),
-              };
-
-          await prisma.$transaction(async (tx) => {
-            await distribucionService.crearOActualizarDistribucion(tx, parseInt(id), porcentajes);
-          });
-        }
       }
 
       return successResponse(res, 200, 'Sesión actualizada', sesion);
@@ -204,17 +217,81 @@ class SesionController {
   /**
    * DELETE /api/sesiones/:id
    * Elimina una sesión (soft delete)
+   * Revierte todos los movimientos de caja relacionados
    */
   async delete(req, res, next) {
     try {
       const { id } = req.params;
 
-      await prisma.sesion.update({
-        where: { id: parseInt(id) },
-        data: { activo: 0 },
+      await prisma.$transaction(async (tx) => {
+        // 1. Obtener todos los movimientos de caja relacionados con esta sesión
+        const movimientos = await tx.movimientoCaja.findMany({
+          where: {
+            sesionId: parseInt(id),
+            activo: 1,
+          },
+          include: {
+            tipoMovimiento: true,
+          },
+        });
+
+        // 2. Revertir cada movimiento de caja
+        // Los ingresos se convierten en egresos y viceversa para revertir el saldo
+        for (const movimiento of movimientos) {
+          // Crear movimiento inverso para revertir el saldo
+          const tipoMovimientoInverso = movimiento.tipoMovimiento.nombre === 'Ingreso' ? 2 : 1; // 1=Ingreso, 2=Egreso
+
+          await tx.movimientoCaja.create({
+            data: {
+              cajaId: movimiento.cajaId,
+              tipoMovimientoId: tipoMovimientoInverso,
+              concepto: `Reversión: ${movimiento.concepto} (Sesión eliminada)`,
+              monto: movimiento.monto,
+              usuarioId: req.user.id,
+              sesionId: parseInt(id),
+              activo: 1,
+            },
+          });
+
+          // Marcar el movimiento original como inactivo
+          await tx.movimientoCaja.update({
+            where: { id: movimiento.id },
+            data: { activo: 0 },
+          });
+        }
+
+        // 3. Marcar liquidaciones como inactivas
+        await tx.liquidacion.updateMany({
+          where: { sesionId: parseInt(id) },
+          data: { activo: 0 },
+        });
+
+        // 4. Marcar ingresos extra como inactivos
+        await tx.ingresoExtra.updateMany({
+          where: { sesionId: parseInt(id) },
+          data: { activo: 0 },
+        });
+
+        // 5. Marcar gastos como inactivos
+        await tx.gasto.updateMany({
+          where: { sesionId: parseInt(id) },
+          data: { activo: 0 },
+        });
+
+        // 6. Marcar distribución como inactiva
+        await tx.distribucionSesion.updateMany({
+          where: { sesionId: parseInt(id) },
+          data: { activo: 0 },
+        });
+
+        // 7. Finalmente, marcar la sesión como inactiva
+        await tx.sesion.update({
+          where: { id: parseInt(id) },
+          data: { activo: 0 },
+        });
       });
 
-      return successResponse(res, 200, 'Sesión eliminada exitosamente');
+      return successResponse(res, 200, 'Sesión eliminada y movimientos revertidos exitosamente');
     } catch (error) {
       next(error);
     }
