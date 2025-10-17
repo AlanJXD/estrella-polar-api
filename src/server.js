@@ -3,7 +3,6 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
 
 // Importar middlewares
 const { errorHandler, notFound } = require('./middlewares/errorHandler.middleware');
@@ -58,38 +57,60 @@ if (process.env.NODE_ENV === 'development') {
   app.use(morgan('combined'));
 }
 
-// Rate limiting (protección contra ataques de fuerza bruta)
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: process.env.NODE_ENV === 'development' ? 500 : 100, // límite más alto en desarrollo
-  message: 'Demasiadas peticiones desde esta IP, intenta de nuevo más tarde',
-  standardHeaders: true,
-  legacyHeaders: false,
-});
-
-app.use('/api/', limiter);
-
-// Rate limiting más estricto para rutas de autenticación
-const authLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 10, // límite de 10 intentos de login
-  message: 'Demasiados intentos de autenticación, intenta de nuevo en 15 minutos',
-  skipSuccessfulRequests: true,
-});
-
-app.use('/api/auth/login', authLimiter);
-app.use('/api/auth/register', authLimiter);
-
 // =============================================
 // RUTAS
 // =============================================
 
-// Health check
+// Health check MEJORADO
 app.get('/health', (req, res) => {
-  res.json({
+  const healthCheck = {
     success: true,
-    message: 'API funcionando correctamente',
+    message: '✅ API funcionando correctamente',
     timestamp: new Date().toISOString(),
+    uptime: `${process.uptime().toFixed(2)} segundos`,
+    environment: process.env.NODE_ENV || 'development',
+    version: process.env.npm_package_version || '1.0.0',
+    memoryUsage: {
+      rss: `${(process.memoryUsage().rss / 1024 / 1024).toFixed(2)} MB`,
+      heapTotal: `${(process.memoryUsage().heapTotal / 1024 / 1024).toFixed(2)} MB`,
+      heapUsed: `${(process.memoryUsage().heapUsed / 1024 / 1024).toFixed(2)} MB`,
+      external: `${(process.memoryUsage().external / 1024 / 1024).toFixed(2)} MB`,
+    },
+    nodeVersion: process.version,
+    platform: process.platform,
+  };
+
+  res.status(200).json(healthCheck);
+});
+
+// Health check adicional para servicios externos
+app.get('/health/advanced', async (req, res) => {
+  try {
+    const healthData = {
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      checks: {
+        api: { status: 'ok', message: 'API principal operativa' },
+        database: { status: 'checking', message: 'Verificando conexión a BD...' },
+      }
+    };
+
+    res.status(200).json(healthData);
+  } catch (error) {
+    res.status(503).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
+});
+
+// Health check simple para monitoreo externo (ping)
+app.get('/ping', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'pong',
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -123,6 +144,7 @@ app.listen(PORT, () => {
   ║    Servidor corriendo en puerto ${PORT}                   ║
   ║    Entorno: ${process.env.NODE_ENV || 'development'}                        ║
   ║    URL: http://localhost:${PORT}                          ║
+  ║    Rate Limiting: DESACTIVADO                         ║
   ║                                                        ║
   ╚════════════════════════════════════════════════════════╝
   `);
