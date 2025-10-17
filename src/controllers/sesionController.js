@@ -138,8 +138,25 @@ class SesionController {
         data.horaFinal = horaDate;
       }
 
-      if (anticipo !== undefined) data.anticipo = Number(anticipo);
-      if (restante !== undefined) data.restante = Number(restante);
+      // Si se actualiza el anticipo, recalcular el restante automáticamente
+      if (anticipo !== undefined) {
+        data.anticipo = Number(anticipo);
+
+        // Obtener el paquete para calcular el restante
+        const sesionActual = await prisma.sesion.findUnique({
+          where: { id: parseInt(id) },
+          include: { paquete: true },
+        });
+
+        if (sesionActual) {
+          data.restante = Number(sesionActual.paquete.precio) - Number(anticipo);
+        }
+      }
+
+      // Permitir actualizar restante manualmente solo si no se actualiza el anticipo
+      if (restante !== undefined && anticipo === undefined) {
+        data.restante = Number(restante);
+      }
 
       // Solo actualizar montoCaja si se proporciona
       if (montoCaja !== undefined) {

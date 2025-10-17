@@ -20,7 +20,6 @@ class SesionService {
       paqueteId,
       especificaciones,
       anticipo = 0,
-      restante = 0,
       comentario,
       montoCaja = 0,
     } = datos;
@@ -36,12 +35,13 @@ class SesionService {
 
     // Ejecutar todo en una transacción optimizada
     return await prisma.$transaction(async (tx) => {
-      // 1. Verificar que el paquete existe y está activo
+      // 1. Verificar que el paquete existe y está activo, y obtener el precio
       const paquete = await tx.paquete.findUnique({
         where: { id: paqueteId },
         select: {
           id: true,
           activo: true,
+          precio: true,
           porcentajeItzel: true,
           porcentajeCristian: true,
           porcentajeCesar: true,
@@ -51,6 +51,9 @@ class SesionService {
       if (!paquete || paquete.activo !== 1) {
         throw new Error('Paquete no encontrado o inactivo');
       }
+
+      // Calcular el restante automáticamente: precio del paquete - anticipo
+      const restante = Number(paquete.precio) - Number(anticipo);
 
       // 2. Obtener IDs de cajas si se necesitan (en paralelo)
       let cajaBBVAId = null;
